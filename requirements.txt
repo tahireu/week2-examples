@@ -1,6 +1,8 @@
 llama-index
+llama-index-llms-openai-like
 llama-index-embeddings-huggingface
 llama-index-core
 sentence-transformers
 requests
 torch
+tavily-python
