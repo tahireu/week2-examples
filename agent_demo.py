@@ -19,19 +19,23 @@ import asyncio
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from llama_index.llms.openai_like import OpenAILike
 from llama_index.core.agent.workflow import FunctionAgent
 from tavily import AsyncTavilyClient
 
+load_dotenv()
+
 
 SKILLS_FILE = Path("SKILLS.md")
+UKISAI_KNOWLEDGE_FILE = Path("skills/ukisai.md")
 
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
 
 llm = OpenAILike(
     model="qwen3-80b",
-    api_base="https://api.ukisai.academy",
+    api_base="https://api.ukisai.academy/v1",
     api_key="dummy",
     is_function_calling_model=True,
     is_chat_model=True,
@@ -105,47 +109,70 @@ def load_skills() -> str:
     return "(no SKILLS.md found)"
 
 
+def load_ukisai_knowledge() -> str:
+    if UKISAI_KNOWLEDGE_FILE.exists():
+        return UKISAI_KNOWLEDGE_FILE.read_text(encoding="utf-8")
+    return "(no skills/ukisai.md found)"
+
+
+UKISAI_SYSTEM_PROMPT = """You are an AI assistant for UkisAI.
+
+Your role is to clearly explain what UkisAI does, answer questions about UkisAI's products, services, and capabilities, and help users understand how UkisAI can help them.
+
+You must:
+- Only answer questions related to UkisAI.
+- Use the provided context and conversation history to give accurate, relevant answers.
+- Be concise, clear, and helpful.
+- Ask clarifying questions if the user's request is unclear.
+
+You must NOT:
+- Answer questions unrelated to UkisAI.
+- Provide general knowledge, opinions, or information outside of UkisAI.
+- Make up information if you are unsure.
+
+If a question is not related to UkisAI, politely refuse and guide the user back to UkisAI-related topics."""
+
+
 # ── Agent ─────────────────────────────────────────────────────────────────────
 
 agent = FunctionAgent(
     tools=[search_web, create_note, edit_file],
     llm=llm,
     system_prompt=(
-        "You are a capable assistant with access to the web and the filesystem.\n\n"
-        "When you need live or recent information, call search_web.\n"
-        "When you want to save knowledge or notes, call create_note — this also "
-        "registers the file in the index so you remember it exists.\n"
-        "When you need to update an existing file, call edit_file.\n\n"
-        "Here is your current knowledge index (SKILLS.md):\n\n"
+        UKISAI_SYSTEM_PROMPT
+        + "\n\n## UkisAI knowledge base\n\n"
+        + load_ukisai_knowledge()
+        + "\n\n## Skills index (SKILLS.md)\n\n"
         + load_skills()
+        + "\n\nYou have tools: search_web, create_note, and edit_file. "
+        "Use search_web only for factual questions strictly about UkisAI when the knowledge base above "
+        "is insufficient; do not use web search for unrelated topics. "
+        "Use create_note and edit_file only for UkisAI-related notes or documentation."
     ),
 )
 
 
-# ── Demo ──────────────────────────────────────────────────────────────────────
+# ── Chat loop ─────────────────────────────────────────────────────────────────
 
-async def ask(question: str):
-    print("\n" + "=" * 65)
-    print(f"  {question}")
-    print("=" * 65)
-    response = await agent.run(user_msg=question)
-    print(f"\n  → {response}\n")
+from llama_index.core.workflow import Context
 
 
-async def main():
-    # 1. Web search
-    await ask("What are the top AI news stories today?")
+async def chat():
+    ctx = Context(agent)
+    print("UkisAI chatbot — type 'exit' or 'quit' to leave.\n")
+    while True:
+        try:
+            question = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not question:
+            continue
+        if question.lower() in {"exit", "quit"}:
+            break
+        response = await agent.run(user_msg=question, ctx=ctx)
+        print(f"\nBot: {response}\n")
 
-    # 2. Create a note — also updates SKILLS.md automatically
-    await ask(
-        "Search the web for the best Python tips for beginners and save "
-        "them to notes/python_tips.md"
-    )
 
-    # 3. Edit an existing file
-    await ask(
-        "Add a tip about using list comprehensions to notes/python_tips.md"
-    )
-
-
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(chat())

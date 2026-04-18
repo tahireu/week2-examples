@@ -6,3 +6,4 @@ sentence-transformers
 requests
 torch
 tavily-python
+python-dotenv
